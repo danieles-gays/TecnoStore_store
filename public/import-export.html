@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Importar / Exportar — TecnoStore Almacén</title>
+    <link rel="stylesheet" href="/css/main.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="main">
+        <header class="topbar">
+            <span class="topbar-title">Importar / Exportar Inventario</span>
+        </header>
+        <div class="content">
+            <div id="alert-container"></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+
+                <!-- IMPORTAR -->
+                <div class="card">
+                    <div class="card-header"><h2>📥 Importar productos</h2></div>
+                    <div class="card-body">
+                        <p class="text-muted" style="margin-bottom:16px;font-size:13px;">
+                            Importa productos en masa desde un fichero. El sistema detecta automáticamente
+                            el formato del fichero y actualiza los productos existentes por SKU.
+                        </p>
+                        <p class="text-muted" style="margin-bottom:16px;font-size:12px;">
+                            Formatos soportados: <strong>CSV, JSON</strong>
+                        </p>
+
+                        <div class="upload-area" id="upload-area" onclick="document.getElementById('file-input').click()">
+                            <div class="icon">📂</div>
+                            <p><strong>Haz clic para seleccionar un fichero</strong></p>
+                            <p>o arrastra y suelta aquí</p>
+                            <input type="file" id="file-input" accept=".csv,.json,.js" onchange="handleFileSelect(event)">
+                        </div>
+
+                        <div id="file-info" style="display:none;margin-top:12px;" class="alert alert-success"></div>
+
+                        <button class="btn btn-primary w-100" style="margin-top:16px;" onclick="importFile()" id="btn-import" disabled>
+                            Importar productos
+                        </button>
+
+                        <div id="import-result" style="margin-top:12px;"></div>
+                    </div>
+                </div>
+
+                <!-- EXPORTAR -->
+                <div class="card">
+                    <div class="card-header"><h2>📤 Exportar inventario</h2></div>
+                    <div class="card-body">
+                        <p class="text-muted" style="margin-bottom:16px;font-size:13px;">
+                            Exporta el inventario completo a un fichero CSV. Especifica el nombre del fichero
+                            de salida (sin extensión).
+                        </p>
+
+                        <div class="form-group">
+                            <label class="form-label">Nombre del fichero</label>
+                            <div style="display:flex;gap:8px;align-items:center;">
+                                <input type="text" id="export-filename" class="form-control" placeholder="inventario_junio" value="inventario">
+                                <span class="text-muted" style="white-space:nowrap;font-size:13px;">.csv</span>
+                            </div>
+                            <p class="text-muted" style="font-size:12px;margin-top:4px;">
+                                El fichero se guardará en el directorio <code>exports/</code> del servidor.
+                            </p>
+                        </div>
+
+                        <button class="btn btn-success w-100" style="margin-top:8px;" onclick="exportInventory()">
+                            Generar exportación
+                        </button>
+
+                        <div id="export-result" style="margin-top:12px;"></div>
+
+                        <hr style="margin:20px 0;border:none;border-top:1px solid var(--border);">
+                        <h4 style="margin-bottom:12px;font-size:13px;">Exportaciones recientes</h4>
+                        <div id="export-list" class="text-muted" style="font-size:13px;">Cargando...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+    if (!requireAuth()) throw new Error();
+    if (!isAdmin()) window.location.href = '/dashboard.html';
+    document.getElementById('sidebar').innerHTML = renderSidebar('import-export');
+
+    let selectedFile = null;
+
+    const uploadArea = document.getElementById('upload-area');
+    uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+    uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+    uploadArea.addEventListener('drop', e => {
+        e.preventDefault();
+        uploadArea.classList.remove('dragover');
+        const file = e.dataTransfer.files[0];
+        if (file) setFile(file);
+    });
+
+    function handleFileSelect(e) { if (e.target.files[0]) setFile(e.target.files[0]); }
+
+    function setFile(file) {
+        selectedFile = file;
+        document.getElementById('file-info').style.display = 'block';
+        document.getElementById('file-info').textContent = `Fichero seleccionado: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+        document.getElementById('btn-import').disabled = false;
+    }
+
+    async function importFile() {
+        if (!selectedFile) return;
+
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+
+        const token = getToken();
+        const res = await fetch('/api/export/import', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: formData
+        });
+
+        const data = await res.json();
+        const resultDiv = document.getElementById('import-result');
+
+        if (!res.ok) {
+            resultDiv.innerHTML = `<div class="alert alert-error">${data.error || 'Error al importar.'}</div>`;
+            return;
+        }
+
+        resultDiv.innerHTML = `
+            <div class="alert alert-success">
+                Importación completada: <strong>${data.created}</strong> productos creados,
+                <strong>${data.updated}</strong> actualizados.
+                ${data.errors.length > 0 ? `<br><span class="text-danger">${data.errors.length} errores.</span>` : ''}
+            </div>`;
+
+        selectedFile = null;
+        document.getElementById('file-input').value = '';
+        document.getElementById('file-info').style.display = 'none';
+        document.getElementById('btn-import').disabled = true;
+    }
+
+    async function exportInventory() {
+        const filename = document.getElementById('export-filename').value.trim() || 'inventario';
+        const resultDiv = document.getElementById('export-result');
+        resultDiv.innerHTML = '<div class="alert alert-warning">Generando exportación...</div>';
+
+        const r = await apiFetch('/export', {
+            method: 'POST',
+            body: JSON.stringify({ filename })
+        });
+
+        if (!r.ok) {
+            resultDiv.innerHTML = `<div class="alert alert-error">${r.data.error || 'Error al exportar.'}</div>`;
+            return;
+        }
+
+        resultDiv.innerHTML = `<div class="alert alert-success">${r.data.message}</div>`;
+        loadExportList();
+    }
+
+    async function loadExportList() {
+        const r = await apiFetch('/export/list');
+        const el = document.getElementById('export-list');
+
+        if (!r.ok || r.data.length === 0) {
+            el.textContent = 'No hay exportaciones generadas.';
+            return;
+        }
+
+        el.innerHTML = r.data.map(f => `
+            <div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;">
+                <span>📄</span> <code>${f}</code>
+            </div>`).join('');
+    }
+
+    loadExportList();
+</script>
+</body>
+</html>

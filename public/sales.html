@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ventas — TecnoStore Almacén</title>
+    <link rel="stylesheet" href="/css/main.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="main">
+        <header class="topbar">
+            <span class="topbar-title">Registro de Ventas</span>
+            <div class="topbar-actions">
+                <select id="filter-status" class="form-control" style="width:160px;" onchange="loadSales()">
+                    <option value="">Todos los estados</option>
+                    <option value="completed">Completadas</option>
+                    <option value="pending">Pendientes</option>
+                    <option value="cancelled">Canceladas</option>
+                    <option value="refunded">Reembolsadas</option>
+                </select>
+            </div>
+        </header>
+        <div class="content">
+            <div id="alert-container"></div>
+
+            <!-- Stats -->
+            <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);" id="sales-stats">
+                <div class="stat-card"><div class="stat-icon green">🛒</div><div><div class="stat-value" id="stat-orders">—</div><div class="stat-label">Pedidos totales</div></div></div>
+                <div class="stat-card"><div class="stat-icon blue">📦</div><div><div class="stat-value" id="stat-units">—</div><div class="stat-label">Unidades vendidas</div></div></div>
+                <div class="stat-card"><div class="stat-icon amber">💶</div><div><div class="stat-value" id="stat-revenue">—</div><div class="stat-label">Ingresos totales</div></div></div>
+                <div class="stat-card"><div class="stat-icon blue">📈</div><div><div class="stat-value" id="stat-avg">—</div><div class="stat-label">Ticket medio</div></div></div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:2fr 1fr;gap:20px;">
+
+                <!-- Listado de ventas -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Historial de ventas</h2>
+                        <div class="search-bar" style="margin:0;">
+                            <input type="text" id="search-sku" class="form-control" placeholder="Filtrar por SKU..." style="width:200px;" oninput="debouncedSearch()">
+                        </div>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Pedido</th>
+                                    <th>Producto</th>
+                                    <th>SKU</th>
+                                    <th>Qty</th>
+                                    <th>Precio unit.</th>
+                                    <th>Total</th>
+                                    <th>Estado</th>
+                                    <th>Fecha</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="sales-table"></tbody>
+                        </table>
+                    </div>
+                    <div style="padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;">
+                        <button class="btn btn-ghost btn-sm" id="btn-prev" onclick="prevPage()">← Anterior</button>
+                        <span id="page-info" class="text-muted" style="font-size:12px;"></span>
+                        <button class="btn btn-ghost btn-sm" id="btn-next" onclick="nextPage()">Siguiente →</button>
+                    </div>
+                </div>
+
+                <!-- Top productos -->
+                <div class="card">
+                    <div class="card-header"><h2>Top 5 productos</h2></div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr><th>Producto</th><th>Uds.</th><th>Ingresos</th></tr></thead>
+                            <tbody id="top-products-table"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal detalle pedido -->
+<div class="modal-overlay" id="modal-order">
+    <div class="modal" style="width:620px;">
+        <div class="modal-header">
+            <h3 id="modal-order-title">Detalle del pedido</h3>
+            <button class="modal-close" onclick="closeModal('modal-order')">✕</button>
+        </div>
+        <div class="modal-body" id="modal-order-body"></div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="closeModal('modal-order')">Cerrar</button>
+        </div>
+    </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+    if (!requireAuth()) throw new Error();
+    document.getElementById('sidebar').innerHTML = renderSidebar('sales');
+
+    const PAGE_SIZE = 20;
+    let currentPage = 0;
+    let searchTimeout;
+
+    function debouncedSearch() {
+        clearTimeout(searchTimeout);
+        currentPage = 0;
+        searchTimeout = setTimeout(loadSales, 350);
+    }
+
+    function prevPage() { if (currentPage > 0) { currentPage--; loadSales(); } }
+    function nextPage() { currentPage++; loadSales(); }
+
+    async function loadStats() {
+        const r = await apiFetch('/sales/stats');
+        if (!r.ok) return;
+        const s = r.data;
+        document.getElementById('stat-orders').textContent  = s.total_orders;
+        document.getElementById('stat-units').textContent   = s.total_units;
+        document.getElementById('stat-revenue').textContent = formatPrice(s.total_revenue);
+        document.getElementById('stat-avg').textContent     = formatPrice(s.avg_order_value);
+
+        const topBody = document.getElementById('top-products-table');
+        topBody.innerHTML = s.top_products.length === 0
+            ? '<tr><td colspan="3" class="text-muted" style="padding:20px;text-align:center;">Sin datos</td></tr>'
+            : s.top_products.map((p, i) => `
+                <tr>
+                    <td><span class="text-muted" style="font-size:11px;">#${i+1}</span> ${p.product_name || p.product_sku}</td>
+                    <td class="fw-bold">${p.units_sold}</td>
+                    <td>${formatPrice(p.revenue)}</td>
+                </tr>`).join('');
+    }
+
+    async function loadSales() {
+        const sku    = document.getElementById('search-sku').value.trim();
+        const status = document.getElementById('filter-status').value;
+
+        let qs = `?limit=${PAGE_SIZE}&offset=${currentPage * PAGE_SIZE}`;
+        if (sku)    qs += `&sku=${encodeURIComponent(sku)}`;
+        if (status) qs += `&status=${status}`;
+
+        const r = await apiFetch('/sales' + qs);
+        const tbody = document.getElementById('sales-table');
+
+        if (!r.ok) {
+            tbody.innerHTML = `<tr><td colspan="9" class="text-danger" style="padding:20px;text-align:center;">${r.data.error}</td></tr>`;
+            return;
+        }
+
+        const sales = r.data;
+        const statusBadge = {
+            completed: '<span class="badge badge-green">Completada</span>',
+            pending:   '<span class="badge badge-amber">Pendiente</span>',
+            cancelled: '<span class="badge badge-gray">Cancelada</span>',
+            refunded:  '<span class="badge badge-red">Reembolsada</span>',
+        };
+
+        tbody.innerHTML = sales.length === 0
+            ? '<tr><td colspan="9" class="text-muted" style="padding:24px;text-align:center;">No hay ventas registradas.</td></tr>'
+            : sales.map(s => `
+                <tr>
+                    <td><code style="font-size:11px;">#${s.order_id}</code></td>
+                    <td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.product_name || '—'}</td>
+                    <td><code>${s.product_sku}</code></td>
+                    <td class="fw-bold">${s.quantity}</td>
+                    <td>${formatPrice(s.unit_price)}</td>
+                    <td class="fw-bold">${formatPrice(s.total)}</td>
+                    <td>${statusBadge[s.status] || s.status}</td>
+                    <td class="text-muted" style="white-space:nowrap;">${formatDate(s.created_at)}</td>
+                    <td>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-ghost btn-sm" onclick="viewOrder('${s.order_id}')">Pedido</button>
+                            ${isAdmin() ? `
+                            <select class="form-control" style="padding:4px 6px;font-size:11px;width:110px;" onchange="updateStatus(${s.id}, this.value)">
+                                <option value="completed" ${s.status==='completed'?'selected':''}>Completada</option>
+                                <option value="pending"   ${s.status==='pending'  ?'selected':''}>Pendiente</option>
+                                <option value="cancelled" ${s.status==='cancelled'?'selected':''}>Cancelada</option>
+                                <option value="refunded"  ${s.status==='refunded' ?'selected':''}>Reembolsada</option>
+                            </select>` : ''}
+                        </div>
+                    </td>
+                </tr>`).join('');
+
+        document.getElementById('page-info').textContent =
+            `Página ${currentPage + 1} · ${sales.length} resultados`;
+        document.getElementById('btn-prev').disabled = currentPage === 0;
+        document.getElementById('btn-next').disabled = sales.length < PAGE_SIZE;
+    }
+
+    async function viewOrder(orderId) {
+        const r = await apiFetch('/sales/order/' + orderId);
+        if (!r.ok) return;
+
+        const items = r.data;
+        const orderTotal = items.reduce((sum, i) => sum + i.total, 0);
+
+        document.getElementById('modal-order-title').textContent = `Pedido #${orderId}`;
+        document.getElementById('modal-order-body').innerHTML = `
+            <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">
+                <thead>
+                    <tr style="background:var(--bg);">
+                        <th style="padding:8px 12px;text-align:left;font-size:11px;color:var(--text-muted);">Producto</th>
+                        <th style="padding:8px 12px;text-align:left;font-size:11px;color:var(--text-muted);">SKU</th>
+                        <th style="padding:8px 12px;text-align:right;font-size:11px;color:var(--text-muted);">Qty</th>
+                        <th style="padding:8px 12px;text-align:right;font-size:11px;color:var(--text-muted);">Precio unit.</th>
+                        <th style="padding:8px 12px;text-align:right;font-size:11px;color:var(--text-muted);">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${items.map(i => `
+                        <tr style="border-bottom:1px solid var(--border);">
+                            <td style="padding:10px 12px;">${i.product_name || '—'}</td>
+                            <td style="padding:10px 12px;"><code>${i.product_sku}</code></td>
+                            <td style="padding:10px 12px;text-align:right;">${i.quantity}</td>
+                            <td style="padding:10px 12px;text-align:right;">${formatPrice(i.unit_price)}</td>
+                            <td style="padding:10px 12px;text-align:right;font-weight:700;">${formatPrice(i.total)}</td>
+                        </tr>`).join('')}
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <td colspan="4" style="padding:10px 12px;text-align:right;font-weight:700;">Total pedido:</td>
+                        <td style="padding:10px 12px;text-align:right;font-weight:700;font-size:15px;">${formatPrice(orderTotal)}</td>
+                    </tr>
+                </tfoot>
+            </table>
+            ${items[0].customer_email && isAdmin() ? `
+                <div style="padding:10px 14px;background:var(--bg);border-radius:var(--radius);font-size:13px;">
+                    <strong>Cliente:</strong> ${items[0].customer_email}
+                    &nbsp;·&nbsp; <strong>Fuente:</strong> ${items[0].source}
+                    &nbsp;·&nbsp; <strong>Fecha:</strong> ${formatDate(items[0].created_at)}
+                </div>` : ''}
+        `;
+        openModal('modal-order');
+    }
+
+    async function updateStatus(id, status) {
+        const r = await apiFetch('/sales/' + id + '/status', {
+            method: 'PATCH',
+            body: JSON.stringify({ status })
+        });
+        if (!r.ok) {
+            showAlert('alert-container', r.data.error || 'Error al actualizar el estado.');
+            loadSales();
+        } else {
+            loadStats();
+        }
+    }
+
+    loadStats();
+    loadSales();
+</script>
+</body>
+</html>

@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TecnoStore — Almacén</title>
+    <link rel="stylesheet" href="/css/main.css">
+</head>
+<body>
+<div class="login-page">
+    <div class="login-box">
+        <div class="login-logo">
+            <h1>📦 TecnoStore Almacén</h1>
+            <p>Sistema de gestión de inventario</p>
+        </div>
+
+        <div id="alert-container"></div>
+
+        <div id="form-login">
+            <div class="form-group">
+                <label class="form-label">Correo electrónico</label>
+                <input type="text" id="username" class="form-control" placeholder="correo@tecnostore.local" autocomplete="email">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Contraseña</label>
+                <input type="password" id="password" class="form-control" placeholder="Introduce tu contraseña" autocomplete="current-password">
+            </div>
+            <button class="btn btn-primary w-100" onclick="doLogin()" style="margin-top:8px;">Iniciar sesión</button>
+            <p style="text-align:center;margin-top:16px;">
+                <a href="#" onclick="showForgot()" style="font-size:12px;color:var(--text-muted);">¿Olvidaste tu contraseña?</a>
+            </p>
+        </div>
+
+        <div id="form-forgot" style="display:none;">
+            <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">
+                Introduce tu correo electrónico y te enviaremos un enlace de recuperación.
+            </p>
+            <div class="form-group">
+                <label class="form-label">Correo electrónico</label>
+                <input type="email" id="forgot-email" class="form-control" placeholder="correo@tecnostore.local">
+            </div>
+            <button class="btn btn-primary w-100" onclick="doForgot()">Enviar enlace</button>
+            <p style="text-align:center;margin-top:16px;">
+                <a href="#" onclick="showLogin()" style="font-size:12px;color:var(--text-muted);">← Volver al login</a>
+            </p>
+        </div>
+
+        <div id="form-reset" style="display:none;">
+            <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">Introduce tu nueva contraseña.</p>
+            <div class="form-group">
+                <label class="form-label">Nueva contraseña</label>
+                <input type="password" id="new-password" class="form-control" placeholder="Nueva contraseña">
+            </div>
+            <button class="btn btn-primary w-100" onclick="doReset()">Cambiar contraseña</button>
+        </div>
+    </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+    // Si ya hay sesión, redirigir al dashboard
+    if (getToken()) window.location.href = '/dashboard.html';
+
+    // Leer token de reset de la URL
+    const urlToken = new URLSearchParams(window.location.search).get('token');
+    if (urlToken) {
+        document.getElementById('form-login').style.display = 'none';
+        document.getElementById('form-reset').style.display = 'block';
+    }
+
+    async function doLogin() {
+        const username = document.getElementById('username').value.trim();
+        const password = document.getElementById('password').value;
+        if (!username || !password) return showAlert('alert-container', 'Introduce usuario y contraseña.');
+
+        const r = await apiFetch('/auth/login', {
+            method: 'POST',
+            body: JSON.stringify({ username, password })
+        });
+
+        if (!r.ok) return showAlert('alert-container', r.data.error || 'Error al iniciar sesión.');
+
+        localStorage.setItem('wh_token', r.data.token);
+        localStorage.setItem('wh_user', JSON.stringify(r.data.user));
+        window.location.href = '/dashboard.html';
+    }
+
+    function showForgot() {
+        document.getElementById('form-login').style.display = 'none';
+        document.getElementById('form-forgot').style.display = 'block';
+        document.getElementById('alert-container').innerHTML = '';
+    }
+
+    function showLogin() {
+        document.getElementById('form-forgot').style.display = 'none';
+        document.getElementById('form-login').style.display = 'block';
+        document.getElementById('alert-container').innerHTML = '';
+    }
+
+    async function doForgot() {
+        const email = document.getElementById('forgot-email').value.trim();
+        if (!email) return showAlert('alert-container', 'Introduce tu correo electrónico.');
+
+        const r = await apiFetch('/auth/forgot-password', {
+            method: 'POST',
+            body: JSON.stringify({ email })
+        });
+
+        if (!r.ok) return showAlert('alert-container', r.data.error || 'Error.');
+        showAlert('alert-container', r.data.message, 'success');
+    }
+
+    async function doReset() {
+        const password = document.getElementById('new-password').value;
+        if (!password) return showAlert('alert-container', 'Introduce una nueva contraseña.');
+
+        const r = await apiFetch('/auth/reset-password', {
+            method: 'POST',
+            body: JSON.stringify({ token: urlToken, password })
+        });
+
+        if (!r.ok) return showAlert('alert-container', r.data.error || 'Error.');
+        showAlert('alert-container', 'Contraseña cambiada. Redirigiendo...', 'success');
+        setTimeout(() => window.location.href = '/', 2000);
+    }
+
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Enter') doLogin();
+    });
+</script>
+</body>
+</html>
