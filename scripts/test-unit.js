@@ -40,3 +40,4 @@ for (const dep of requiredDeps) {
 }
 
 console.log('Test unitario básico OK');
+throw new Error('Fallo intencionado para evidenciar pipeline fallido');
