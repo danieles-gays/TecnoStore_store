@@ -1,0 +1,45 @@
+name: CI/CD TecnoStore Store
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Tests Node.js
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Ejecutar tests unitarios
+        run: npm run test
+
+      - name: Ejecutar tests de integración
+        run: npm run test:integration
+
+  deploy-info:
+    name: Despliegue semiautomático
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Confirmar despliegue semiautomático
+        run: |
+          echo "Tests correctos en main."
+          echo "Despliegue semiautomático: ejecutar script de actualización en EC2."
+          echo "Servicio objetivo: TecnoStore Store en puerto 3000."
